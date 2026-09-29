@@ -2,6 +2,14 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+from advanced_visualizations import (
+    clean_analytics_data,
+    create_performance_distribution,
+    create_performance_heatmap,
+    create_student_profile,
+    create_subject_boxplot,
+    create_subject_risk_matrix,
+)
 from db import get_all_records, get_options
 from utils import classify, recommendation_for
 
@@ -111,6 +119,54 @@ with st.container(border=True):
         with st.container(border=True):
             st.subheader("Suggestions")
             st.info(suggestion)
+
+        # The charts below reuse the records selected by the existing filters.
+        # The profile selector is necessary because a profile needs one known,
+        # currently matching student rather than another broad dashboard filter.
+        analytics_df = clean_analytics_data(df)
+        st.divider()
+        st.subheader("Advanced Academic Analytics")
+        if analytics_df.empty:
+            st.info("No sufficient data available for the advanced visualizations.")
+        else:
+            advanced_col1, advanced_col2 = st.columns(2)
+            distribution_fig = create_performance_distribution(analytics_df)
+            boxplot_fig = create_subject_boxplot(analytics_df)
+            with advanced_col1:
+                if distribution_fig is not None:
+                    st.plotly_chart(distribution_fig, use_container_width=True)
+                else:
+                    st.info("No sufficient data available for the performance distribution.")
+            with advanced_col2:
+                if boxplot_fig is not None:
+                    st.plotly_chart(boxplot_fig, use_container_width=True)
+                else:
+                    st.info("No sufficient data available to compare subject variability.")
+
+            heatmap_fig = create_performance_heatmap(analytics_df)
+            if heatmap_fig is not None:
+                st.plotly_chart(heatmap_fig, use_container_width=True)
+            else:
+                st.info("No sufficient data available for the student-subject heatmap.")
+
+            risk_fig = create_subject_risk_matrix(analytics_df)
+            if risk_fig is not None:
+                st.plotly_chart(risk_fig, use_container_width=True)
+            else:
+                st.info("No sufficient data available for the subject risk matrix.")
+
+            profile_students = sorted(analytics_df["student_name"].unique())
+            if profile_students:
+                selected_profile_student = st.selectbox(
+                    "Student profile",
+                    profile_students,
+                    key="advanced_student_profile",
+                )
+                profile_fig = create_student_profile(analytics_df, selected_profile_student)
+                if profile_fig is not None:
+                    st.plotly_chart(profile_fig, use_container_width=True)
+                else:
+                    st.info("No sufficient data available for this student profile.")
 
 st.divider()
 if st.button("Logout", key="admin_logout"):
