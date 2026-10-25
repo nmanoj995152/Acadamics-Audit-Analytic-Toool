@@ -1,43 +1,18 @@
 import pandas as pd
 import streamlit as st
 
-from db import add_audit_log, add_option, get_all_records, get_options, get_recent_activity, insert_record, update_record, delete_record
+from db import add_audit_log, add_option, get_all_records, get_options, get_recent_activity, insert_record, update_record, delete_record, has_permission
 from marksheet_parser import candidate_sheets, load_file, parse_dataframe
+from theme import apply_theme
+from auth_ui import require_page_access
 
 st.set_page_config(page_title="Registrar Dashboard", layout="wide", initial_sidebar_state="expanded")
 
-if "user" not in st.session_state or st.session_state.user is None:
-    st.warning("Please log in first")
-    st.stop()
+user = require_page_access("marks")
 
-if st.session_state.user["role"] != "registrar":
-    st.error("Only registrars can access this page")
-    st.stop()
-
-st.title("Registrar Dashboard")
-
-st.markdown(
-    """
-    <style>
-    html, body {
-        height: 100%;
-        margin: 0;
-    }
-    [data-testid="stAppViewContainer"] {
-        background-image: linear-gradient(rgba(255,255,255,0.55), rgba(255,255,255,0.55)),
-                          url("https://dfhe5ze0n4pxu.cloudfront.net/College/Background-Images/Background-Image-1767169969170.jpeg");
-        background-size: cover;
-        background-position: center center;
-        background-repeat: no-repeat;
-        background-attachment: scroll;
-        min-height: 100vh;
-    }
-    .stApp { background: transparent !important; }
-    .st-bd, .st-cf { border-radius: 10px; }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+apply_theme()
+st.title("Marks & Dataset Management")
+st.caption("Enter, import, and maintain academic records with a reviewed dataset workflow.")
 
 with st.container(border=True):
     st.subheader("Manual Entry")
@@ -45,6 +20,7 @@ with st.container(border=True):
         col1, col2 = st.columns(2)
         with col1:
             student_name = st.text_input("Student Name")
+            student_identifier = st.text_input("Roll / enrollment number (optional)", help="Stored with the record when supplied. Student access requires an administrator to verify and link this exact identifier.")
             marks_obtained = st.number_input("Marks Obtained", min_value=0.0, step=1.0)
             max_marks = st.number_input("Max Marks", min_value=0.0, step=1.0, value=100.0)
         with col2:
@@ -61,22 +37,22 @@ with st.container(border=True):
         submitted = st.form_submit_button("Save Record")
 
     if submitted:
-        if not student_name.strip() or not marks_obtained or not max_marks:
-            st.error("Please fill all fields")
+        if not student_name.strip() or max_marks <= 0 or marks_obtained > max_marks:
+            st.error("Enter a student name, a positive maximum mark, and marks no greater than the maximum.")
         else:
             selected_section = new_section_value if section == "+ Add new..." and new_section_value else section if section != "All" else ""
             selected_branch = new_branch_value if branch == "+ Add new..." and new_branch_value else branch if branch != "All" else ""
             selected_year = new_year_value if year == "+ Add new..." and new_year_value else year if year != "All" else ""
             selected_subject = new_subject_value if subject == "+ Add new..." and new_subject_value else subject if subject != "All" else ""
             if selected_section:
-                add_option("sections", selected_section)
+                add_option("sections", selected_section, actor=user)
             if selected_branch:
-                add_option("branches", selected_branch)
+                add_option("branches", selected_branch, actor=user)
             if selected_year:
-                add_option("years", selected_year)
+                add_option("years", selected_year, actor=user)
             if selected_subject:
-                add_option("subjects", selected_subject)
-            insert_record(student_name.strip(), selected_section, selected_branch, selected_year, selected_subject, float(marks_obtained), float(max_marks), st.session_state.user["username"])
+                add_option("subjects", selected_subject, actor=user)
+            insert_record(student_name.strip(), selected_section, selected_branch, selected_year, selected_subject, float(marks_obtained), float(max_marks), user["username"], student_identifier, actor=user)
             add_audit_log(st.session_state.user["id"], "manual_entry", {"student_name": student_name.strip(), "subject": selected_subject})
             st.success("Record saved")
 
@@ -118,7 +94,7 @@ with st.container(border=True):
                 review_col1, review_col2 = st.columns(2)
                 with review_col1:
                     student_column = column_choice("Student column", selected_result.detection.student_column, f"student_{uploaded_file.name}_{selected_sheet}")
-                    identifier_column = column_choice("Identifier column (not stored)", selected_result.detection.identifier_column, f"identifier_{uploaded_file.name}_{selected_sheet}")
+                    identifier_column = column_choice("Roll / enrollment number column", selected_result.detection.identifier_column, f"identifier_{uploaded_file.name}_{selected_sheet}")
                     subject_column = column_choice("Subject column for long format", selected_result.detection.subject_column, f"subject_{uploaded_file.name}_{selected_sheet}")
                     marks_column = column_choice("Marks column for long format", selected_result.detection.marks_column, f"marks_{uploaded_file.name}_{selected_sheet}")
                 with review_col2:
@@ -154,6 +130,7 @@ with st.container(border=True):
                 mapping = {
                     "student_column": None if student_column == no_column else student_column,
                     "identifier_column": None if identifier_column == no_column else identifier_column,
+                    "identifier_column": None if identifier_column == no_column else identifier_column,
                     "subject_column": None if subject_column == no_column else subject_column,
                     "marks_column": None if marks_column == no_column else marks_column,
                     "max_marks_column": None if max_column == no_column else max_column,
@@ -172,18 +149,18 @@ with st.container(border=True):
                 st.success(f"{result.students} students, {result.subjects} subjects, {len(result.records)} valid normalized records detected.")
                 if result.invalid_rows:
                     st.error(f"{len(result.invalid_rows)} row issue(s) must be reviewed; invalid rows will not be imported.")
-                    st.dataframe(pd.DataFrame({"Issue": result.invalid_rows}), use_container_width=True, hide_index=True)
+                    st.dataframe(pd.DataFrame({"Issue": result.invalid_rows}), width="stretch", hide_index=True)
                 if result.records:
                     preview = pd.DataFrame(result.records)
                     preview_columns = [field for field in ["student_name", "identifier", "section", "branch", "year", "subject", "marks_obtained", "max_marks", "assessment_components"] if field in preview]
                     st.markdown("#### Normalized Preview")
-                    st.dataframe(preview[preview_columns], use_container_width=True, hide_index=True)
+                    st.dataframe(preview[preview_columns], width="stretch", hide_index=True)
                     if st.button("Confirm Upload", key=f"confirm_{uploaded_file.name}_{selected_sheet}"):
                         for record in result.records:
                             for field in ["section", "branch", "year", "subject"]:
                                 if record[field]:
-                                    add_option({"section": "sections", "branch": "branches", "year": "years", "subject": "subjects"}[field], record[field])
-                            insert_record(record["student_name"], record["section"], record["branch"], record["year"], record["subject"], float(record["marks_obtained"]), float(record["max_marks"]), st.session_state.user["username"])
+                                    add_option({"section": "sections", "branch": "branches", "year": "years", "subject": "subjects"}[field], record[field], actor=user)
+                            insert_record(record["student_name"], record["section"], record["branch"], record["year"], record["subject"], float(record["marks_obtained"]), float(record["max_marks"]), user["username"], record.get("identifier"), actor=user)
                         add_audit_log(st.session_state.user["id"], "upload", {"rows": len(result.records), "sheet": selected_sheet})
                         st.success(f"Upload completed: {len(result.records)} records imported.")
                 elif result.invalid_rows:
@@ -204,14 +181,14 @@ with st.container(border=True):
         subject_filter = st.selectbox("Subject Filter", options=["All"] + get_options("subjects"), key="subject_filter")
 
     filters = {k: v for k, v in {"section": section_filter, "branch": branch_filter, "year": year_filter, "subject": subject_filter}.items() if v != "All"}
-    records = get_all_records(filters)
+    records = get_all_records(filters, actor=user)
     if records:
         edited_df = pd.DataFrame(records)
         edited_df["delete"] = False
         edited_df = edited_df[["id", "delete", "student_name", "section", "branch", "year", "subject", "marks_obtained", "max_marks", "entered_by", "created_at", "updated_at"]]
         edited = st.data_editor(
             edited_df,
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             disabled=["id", "entered_by", "created_at", "updated_at"],
             column_config={"delete": st.column_config.CheckboxColumn("Delete", help="Mark rows to delete")},
@@ -220,22 +197,17 @@ with st.container(border=True):
             for _, row in edited.iterrows():
                 if pd.notna(row["id"]):
                     if bool(row["delete"]):
-                        delete_record(int(row["id"]))
+                        delete_record(int(row["id"]), actor=user)
                     else:
-                        update_record(int(row["id"]), row["student_name"], row["section"], row["branch"], row["year"], row["subject"], float(row["marks_obtained"]), float(row["max_marks"]))
+                        update_record(int(row["id"]), row["student_name"], row["section"], row["branch"], row["year"], row["subject"], float(row["marks_obtained"]), float(row["max_marks"]), actor=user)
             st.success("Changes saved")
     else:
         st.info("No records found")
 
 st.subheader("Recent Activity")
-activity = get_recent_activity(10)
+activity = get_recent_activity(10, actor=user) if has_permission(user["role"], "view_activity") else []
 if activity:
     st.dataframe(pd.DataFrame(activity))
 else:
     st.info("No activity yet")
 
-st.divider()
-if st.button("Logout", key="registrar_logout"):
-    st.session_state.user = None
-    st.session_state.role = None
-    st.rerun()

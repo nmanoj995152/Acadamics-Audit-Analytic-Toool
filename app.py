@@ -1,87 +1,42 @@
+"""Entrypoint and role-aware navigation for the Academic Audit app."""
 import streamlit as st
 
-from db import authenticate_user, create_user, hash_password, initialize_db, username_exists
+from auth_ui import DASHBOARD_PATHS, DASHBOARD_TITLES, current_user
+from db import initialize_db
+from theme import apply_theme
 
 initialize_db()
+st.set_page_config(page_title="Academic Audit Analytics", page_icon="📘", layout="wide")
+apply_theme()
 
-st.set_page_config(page_title="Academic Audit Analytics Tool", layout="wide")
+user = current_user()
+route_after_login = bool(st.session_state.pop("_route_after_login", False))
+route_from_home = bool(st.session_state.pop("_route_to_dashboard", False))
+route_to_dashboard = route_after_login or route_from_home
 
-if "user" not in st.session_state:
-    st.session_state.user = None
+# Streamlit only renders pages registered with st.navigation. Keep all four
+# dashboard destinations visible, while each page's require_page_access guard
+# remains authoritative for access to its data and actions.
+role_pages = {
+    role: st.Page(
+        path,
+        title=DASHBOARD_TITLES[role],
+        icon=":material/dashboard:",
+        default=bool(route_to_dashboard and user and user["role"] == role),
+    )
+    for role, path in DASHBOARD_PATHS.items()
+}
+pages = {
+    "": [st.Page(
+        "pages/0_Home.py",
+        title="Academic Audit Analytics",
+        icon=":material/home:",
+        default=not route_to_dashboard,
+    )],
+    "Dashboard Navigation": list(role_pages.values()),
+}
 
-st.title("Academic Audit Analytics Tool")
-st.caption("Registrar-friendly audit entry with role-based analytics and editable records")
-
-st.markdown(
-    """
-    <style>
-    html, body {
-        height: 100%;
-        margin: 0;
-    }
-    [data-testid="stAppViewContainer"] {
-        background-image: linear-gradient(rgba(255,255,255,0.55), rgba(255,255,255,0.55)),
-                          url("https://dfhe5ze0n4pxu.cloudfront.net/College/Background-Images/Background-Image-1767169969170.jpeg");
-        background-size: cover;
-        background-position: center center;
-        background-repeat: no-repeat;
-        background-attachment: scroll;
-        min-height: 100vh;
-    }
-    .stApp { background: transparent !important; }
-    .block-container { padding-top: 1.5rem; }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-if st.session_state.user is None:
-    tabs = st.tabs(["Login", "Register"])
-
-    with tabs[0]:
-        with st.form("login_form"):
-            username = st.text_input("Username")
-            password = st.text_input("Password", type="password")
-            submitted = st.form_submit_button("Login")
-
-        if submitted:
-            user = authenticate_user(username, password)
-            if user:
-                st.session_state.user = user
-                st.session_state.role = user["role"]
-                st.rerun()
-            else:
-                st.error("Invalid username or password")
-
-    with tabs[1]:
-        with st.form("register_form"):
-            reg_username = st.text_input("Username")
-            reg_password = st.text_input("Password", type="password")
-            confirm_password = st.text_input("Confirm Password", type="password")
-            reg_role = st.selectbox("Role", ["registrar", "admin"])
-            register_submitted = st.form_submit_button("Register")
-
-        if register_submitted:
-            if not reg_username.strip():
-                st.error("Username cannot be empty")
-            elif username_exists(reg_username):
-                st.error("Username already taken")
-            elif reg_password != confirm_password:
-                st.error("Passwords do not match")
-            elif len(reg_password) < 6:
-                st.error("Password must be at least 6 characters")
-            else:
-                create_user(reg_username.strip(), hash_password(reg_password), reg_role)
-                st.success("Account created. Please go to the Login tab to sign in.")
-else:
-    st.success(f"Signed in as {st.session_state.user['username']} ({st.session_state.user['role']})")
-    if st.button("Logout", key="home_logout_1"):
-        st.session_state.user = None
-        st.session_state.role = None
-        st.rerun()
-
-if st.session_state.user is not None:
-    if st.session_state.user["role"] == "registrar":
-        st.switch_page("pages/1_Registrar.py")
-    elif st.session_state.user["role"] == "admin":
-        st.switch_page("pages/2_Admin.py")
+navigation = st.navigation(pages, position="sidebar")
+if user and route_to_dashboard and user["role"] in role_pages:
+    st.switch_page(role_pages[user["role"]])
+navigation.run()

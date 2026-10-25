@@ -1,34 +1,35 @@
 # Academic Audit Analytics Tool
 
-A lightweight Streamlit application for managing student marks and viewing role-based analytics.
+A Streamlit application for academic record entry, class analytics, support reporting, and student performance views, backed by SQLite.
 
-## What this project includes
+## Roles
 
-- Streamlit login screen with role-based routing
-- Registrar workflow for Excel upload and manual mark entry
-- Admin analytics dashboard with charts and recommendations
-- SQLite-backed storage using the built-in sqlite3 module
+- **Student:** sees only records linked to their verified roll or enrollment number, with performance summaries and improvement suggestions.
+- **Lecturer:** sees class and subject analytics, at-risk reports, and downloadable filtered CSV reports. An administrator can separately authorize mark entry and editing.
+- **Registrar:** retains the existing spreadsheet import, manual entry, record editing, deletion, options, and activity workflows.
+- **Admin:** sees analytics and manages user accounts and role permissions.
 
-## Requirements
+Student accounts are provisioned by an administrator, not through public registration. A student account requires a verified unique identifier. Legacy records without identifiers remain unlinked and invisible to students. The parser recognizes common roll, registration, and enrollment number headers and imports the selected identifier with new records. Attendance is not currently collected.
 
-Install the Python dependencies:
+## Setup and run
 
-```bash
-pip install -r requirements.txt
-```
-
-## Run the app
-
-```bash
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
 streamlit run app.py
 ```
 
-## Default test accounts
+On macOS/Linux, activate with `source .venv/bin/activate` before installing and running.
 
-- Registrar: username `registrar`, password `registrar123`
-- Admin: username `admin`, password `admin123`
+Fresh databases retain the original convenience accounts: `admin` / `admin123` and `registrar` / `registrar123`. Sign in as admin and reset these passwords in **User & permissions management** before exposing the app beyond a trusted local environment. Accounts created through admin management must use passwords of at least 10 characters. Existing SHA-256 password hashes are verified on successful login and upgraded to Argon2id.
 
-## Notes
+## Database migration
 
-- The database file is created automatically as `academic_audit.db` when the app starts.
-- The SQLite schema is initialized in `db.py` on startup.
+Startup applies additive, idempotent SQLite changes. It adds nullable student identifiers to records and users plus a lecturer mark-edit permission flag. Existing rows, including legacy rows, are retained as-is with no identifier assigned. Student access queries require an exact matching stored identifier.
+
+## Tests
+
+```powershell
+python -m unittest discover -s tests -v
+```
